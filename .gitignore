@@ -1,0 +1,8 @@
+gnore Java class files
+*.class
+
+# Ignore Vim swap/backup files
+*.swp
+*.swo
+*.swx
+*~

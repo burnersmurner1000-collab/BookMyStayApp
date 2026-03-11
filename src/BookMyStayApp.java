@@ -1,6 +1,7 @@
+import java.io.*;
 import java.util.*;
 
-class Reservation {
+class Reservation implements Serializable {
     private String guestName;
     private String roomType;
     private String roomId;
@@ -24,7 +25,7 @@ class Reservation {
     }
 }
 
-class Inventory {
+class Inventory implements Serializable {
     private Map<String, Integer> availability;
 
     public Inventory() {
@@ -34,7 +35,7 @@ class Inventory {
         availability.put("Suite", 2);
     }
 
-    public synchronized boolean allocateRoom(String roomType) {
+    public boolean allocateRoom(String roomType) {
         int count = availability.getOrDefault(roomType, 0);
         if (count > 0) {
             availability.put(roomType, count - 1);
@@ -43,69 +44,84 @@ class Inventory {
         return false;
     }
 
-    public synchronized int getAvailability(String roomType) {
+    public int getAvailability(String roomType) {
         return availability.getOrDefault(roomType, 0);
+    }
+
+    public Map<String, Integer> getAvailabilityMap() {
+        return availability;
     }
 }
 
-class BookingProcessor implements Runnable {
-    private Inventory inventory;
-    private Reservation reservation;
+class BookingHistory implements Serializable {
+    private List<Reservation> history;
 
-    public BookingProcessor(Inventory inventory, Reservation reservation) {
-        this.inventory = inventory;
-        this.reservation = reservation;
+    public BookingHistory() {
+        history = new ArrayList<>();
     }
 
-    @Override
-    public void run() {
-        synchronized (inventory) {
-            if (inventory.allocateRoom(reservation.getRoomType())) {
-                System.out.println("Reservation Confirmed: Guest " + reservation.getGuestName() +
-                        ", Room Type: " + reservation.getRoomType() +
-                        ", Room ID: " + reservation.getRoomId());
-            } else {
-                System.out.println("Reservation Failed: Guest " + reservation.getGuestName() +
-                        ", Room Type: " + reservation.getRoomType() + " not available.");
-            }
+    public void addReservation(Reservation reservation) {
+        history.add(reservation);
+    }
+
+    public List<Reservation> getHistory() {
+        return new ArrayList<>(history);
+    }
+}
+
+class PersistenceService {
+    public void saveState(Inventory inventory, BookingHistory history, String filename) {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(filename))) {
+            out.writeObject(inventory);
+            out.writeObject(history);
+            System.out.println("System state saved successfully.");
+        } catch (IOException e) {
+            System.out.println("Error saving state: " + e.getMessage());
+        }
+    }
+
+    public Object[] loadState(String filename) {
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(filename))) {
+            Inventory inventory = (Inventory) in.readObject();
+            BookingHistory history = (BookingHistory) in.readObject();
+            System.out.println("System state loaded successfully.");
+            return new Object[]{inventory, history};
+        } catch (IOException | ClassNotFoundException e) {
+            System.out.println("Error loading state: " + e.getMessage());
+            return new Object[]{new Inventory(), new BookingHistory()};
         }
     }
 }
 
 public class BookMyStayApp {
     public static void main(String[] args) {
-        Inventory inventory = new Inventory();
+        String filename = "system_state.dat";
+        PersistenceService persistenceService = new PersistenceService();
 
-        List<Reservation> reservations = Arrays.asList(
-                new Reservation("Alice", "Single", "R001"),
-                new Reservation("Bob", "Single", "R002"),
-                new Reservation("Charlie", "Suite", "R003"),
-                new Reservation("David", "Suite", "R004"),
-                new Reservation("Eve", "Suite", "R005"),
-                new Reservation("Frank", "Double", "R006"),
-                new Reservation("Grace", "Double", "R007"),
-                new Reservation("Hank", "Double", "R008"),
-                new Reservation("Ivy", "Double", "R009")
-        );
+        Object[] state = persistenceService.loadState(filename);
+        Inventory inventory = (Inventory) state[0];
+        BookingHistory history = (BookingHistory) state[1];
 
-        List<Thread> threads = new ArrayList<>();
-        for (Reservation r : reservations) {
-            Thread t = new Thread(new BookingProcessor(inventory, r));
-            threads.add(t);
-            t.start();
+        Reservation r1 = new Reservation("Alice", "Single", "R001");
+        if (inventory.allocateRoom(r1.getRoomType())) {
+            history.addReservation(r1);
         }
 
-        for (Thread t : threads) {
-            try {
-                t.join();
-            } catch (InterruptedException e) {
-                System.out.println("Thread interrupted.");
-            }
+        Reservation r2 = new Reservation("Bob", "Suite", "R002");
+        if (inventory.allocateRoom(r2.getRoomType())) {
+            history.addReservation(r2);
         }
 
-        System.out.println("Final Availability:");
-        System.out.println("Single: " + inventory.getAvailability("Single"));
-        System.out.println("Double: " + inventory.getAvailability("Double"));
-        System.out.println("Suite: " + inventory.getAvailability("Suite"));
+        System.out.println("Current Booking History:");
+        for (Reservation r : history.getHistory()) {
+            System.out.println("Guest: " + r.getGuestName() + ", Room Type: " + r.getRoomType() + ", Room ID: " + r.getRoomId());
+        }
+
+        System.out.println("Current Inventory:");
+        for (Map.Entry<String, Integer> entry : inventory.getAvailabilityMap().entrySet()) {
+            System.out.println(entry.getKey() + ": " + entry.getValue());
+        }
+
+        persistenceService.saveState(inventory, history, filename);
     }
 }
